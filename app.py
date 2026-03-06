@@ -52,7 +52,7 @@ def get_route(start_lon, start_lat, end_lon, end_lat):
     return [[start_lon, start_lat], [end_lon, end_lat]], 0.0
 
 # --- 4. DASHBOARD LAYOUT ---
-st.title("🚕 HOW MUCH COST MY FUTURE RIDE?")
+st.title("🚕 HOW MUCH COSTS MY FUTURE RIDE?")
 
 left_col, right_col = st.columns([1, 1.5], gap="large")
 
