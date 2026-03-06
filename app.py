@@ -28,10 +28,6 @@ st.markdown("""
     """, unsafe_allow_html=True)
 
 # 3. INITIALIZATION & UTILITIES
-if 'ordered_now' not in st.session_state:
-    st.session_state.ordered_now = False
-if 'scheduled' not in st.session_state:
-    st.session_state.scheduled = False
 if 'fare_calculated' not in st.session_state:
     st.session_state.fare_calculated = False
 
@@ -105,6 +101,14 @@ with right_col:
         if p_lon and d_lon:
             road_path, total_dist = get_route(p_lon, p_lat, d_lon, d_lat)
 
+            # Set a fallback view state if the calculation fails
+            view_state = pdk.ViewState(
+                latitude=(p_lat + d_lat) / 2,
+                longitude=(p_lon + d_lon) / 2,
+                zoom=11, # Static zoom is often more stable than conditional logic
+                pitch=0
+            )
+
             # Distance Metric
             st.metric("Estimated Travel Distance", f"{total_dist:.2f} km")
 
@@ -136,6 +140,7 @@ with right_col:
 
                 with st.spinner("Calculating fare..."):
                     try:
+                        st.write(params)
                         response = requests.get(url, params=params)
                         data = response.json()
                         st.session_state.current_fare = data.get("fare", 0.0)
