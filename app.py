@@ -118,4 +118,23 @@ if p_lon and d_lon:
 
         with st.spinner("Calculating fare..."):
             try:
-                response = requests.get(api_url, params=params, timeout=
+                response = requests.get(api_url, params=params, timeout=15)
+                if response.status_code == 200:
+                    st.session_state.current_fare = response.json().get("fare", 0.0)
+                    st.session_state.fare_calculated = True
+                    st.rerun()
+                else:
+                    st.error(f"API Error {response.status_code}: {response.text}")
+            except Exception as e:
+                st.error(f"Could not connect to API: {e}")
+else:
+    with right_col:
+        st.warning("⚠️ Enter valid NYC locations to see the map and prediction.")
+
+# Result Banner
+if st.session_state.fare_calculated:
+    btn_area.success(f"### 💰 Estimated Fare: ${st.session_state.current_fare:.2f}")
+    if st.button("Calculate New Trip"):
+        st.session_state.fare_calculated = False
+        st.session_state.ordered = False
+        st.rerun()
