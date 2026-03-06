@@ -123,10 +123,12 @@ with right_col:
 
 # --- 6. PRÉDICTION VIA API ---
 if eval_click:
-    # On s'assure que l'URL finit par /predict
+    # 1. On nettoie l'URL de base pour éviter les doubles slashes ou les espaces
+    # Si ton secret est "https://nom-api.run.app", cela devient "https://nom-api.run.app/predict"
     base_url = st.secrets['url_base'].strip().rstrip('/')
     api_url = f"{base_url}/predict"
 
+    # 2. Formatage de la date exactement comme ton décorateur @app.get("/predict") l'attend
     pickup_dt_str = f"{sel_date} {sel_time.strftime('%H:%M:%S')}"
 
     params = {
@@ -138,17 +140,22 @@ if eval_click:
         "passenger_count": int(passengers)
     }
 
-    with st.spinner("L'API se réveille... calcul en cours (cela peut prendre 20s)"):
+    with st.spinner("Appel de l'API en cours..."):
         try:
-            # On augmente le timeout à 30 secondes pour laisser le temps au Cloud Run de démarrer
-            r = requests.get(api_url, params=params, timeout=30)
-            if r.status_code == 200:
-                st.session_state.current_fare = r.json().get("fare", 0.0)
+            # On affiche l'URL de test une seule fois pour vérifier en cas d'échec
+            # st.write(f"DEBUG: Envoi vers {api_url}")
+
+            response = requests.get(api_url, params=params, timeout=30)
+
+            if response.status_code == 200:
+                # Ton API retourne {'fare': float(prediction)}
+                st.session_state.current_fare = response.json().get("fare", 0.0)
                 st.session_state.fare_calculated = True
                 st.rerun()
+            elif response.status_code == 404:
+                st.error(f"Erreur 404 : L'URL '{api_url}' est introuvable. Vérifie que ton API FastAPI contient bien @app.get('/predict').")
             else:
-                st.error(f"Erreur API ({r.status_code}) : Vérifie tes paramètres.")
-        except requests.exceptions.Timeout:
-            st.error("Délai dépassé : Ton API met trop de temps à répondre. Réessaie dans quelques secondes.")
+                st.error(f"Erreur API ({response.status_code}) : {response.text}")
+
         except Exception as e:
             st.error(f"Erreur de connexion : {e}")
