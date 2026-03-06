@@ -6,156 +6,163 @@ from datetime import datetime
 from geopy.geocoders import Nominatim
 
 # 1. PAGE CONFIGURATION
-st.set_page_config(layout="wide", page_title="Taxi Fare Predictor")
+st.set_page_config(layout="wide", page_title="NYC Taxi Fare Predictor", page_icon="🚕")
 
-# 2. INITIALIZATION & STYLING
-if 'fare_calculated' not in st.session_state:
-    st.session_state.fare_calculated = False
-if 'ordered' not in st.session_state:
-    st.session_state.ordered = False
+# 2. INITIALIZATION
+if 'fare_calculated' not in st.session_state: st.session_state.fare_calculated = False
+if 'ordered' not in st.session_state: st.session_state.ordered = False
+if 'p_addr' not in st.session_state: st.session_state.p_addr = ""
+if 'd_addr' not in st.session_state: st.session_state.d_addr = ""
 
-# Inject CSS for the Green Button and UI
+# 3. PRETTIER UI (Custom CSS)
+button_color = "#28a745" if st.session_state.ordered else "#FF4B4B"
+
 st.markdown(f"""
     <style>
-    html, body, [class*="View"] {{ font-size: 18px !important; }}
-    .stButton button p {{ font-size: 22px !important; font-weight: bold !important; }}
-    /* Change button color to green if 'ordered' is True */
-    div.stButton > button:first-child {{
-        background-color: {"#28a745" if st.session_state.ordered else "#FF4B4B"} !important;
-        color: white !important;
+    /* Main Background */
+    .stApp {{
+        background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+    }}
+
+    /* Card Styling */
+    div[data-testid="stVerticalBlock"] > div:has(div.stMetric) {{
+        background: rgba(255, 255, 255, 0.8);
+        border-radius: 15px;
+        padding: 20px;
+        box-shadow: 0 4px 15px rgba(0,0,0,0.05);
+    }}
+
+    /* Button Styling */
+    div.stButton > button {{
+        border-radius: 8px !important;
+        height: 3em !important;
+        transition: all 0.3s ease !important;
+    }}
+
+    /* The Order Now Button Dynamic Color */
+    div.stButton > button[kind="primary"]:first-of-type {{
+        background-color: {button_color} !important;
+        border: none !important;
+        box-shadow: 0 4px 12px {button_color}66;
+    }}
+
+    /* Title Styling */
+    h1 {{
+        font-family: 'Helvetica Neue', sans-serif;
+        font-weight: 800;
+        color: #1e293b;
+        letter-spacing: -1px;
     }}
     </style>
     """, unsafe_allow_html=True)
 
+# 4. UTILITIES
 url = st.secrets["url_base"]
-# Added a more specific user_agent to avoid Nominatim blocks
-geolocator = Nominatim(user_agent="nyc_taxi_predictor_app_v2")
+geolocator = Nominatim(user_agent="nyc_taxi_pro_v4")
 
-def get_coords(address):
-    if not address: return None, None
+def search_location(query):
+    """Finds the best NYC match and returns (Display Name, Lon, Lat)"""
+    if not query or len(query) < 3: return None
     try:
-        # Adding 'New York' to the string helps Nominatim find NYC locations faster
-        location = geolocator.geocode(f"{address}, New York", timeout=10)
+        # We force 'New York City' into the query for better accuracy
+        location = geolocator.geocode(f"{query}, NYC", timeout=10, addressdetails=True)
         if location:
-            return location.longitude, location.latitude
-    except:
-        pass
-    return None, None
+            # Shorten the name (e.g., "Empire State Building, 5th Ave...")
+            short_name = location.address.split(',')[0] + ", " + location.address.split(',')[1]
+            return {"name": short_name, "lon": location.longitude, "lat": location.latitude}
+    except: pass
+    return None
 
-def get_route(start_lon, start_lat, end_lon, end_lat):
-    osrm_url = f"http://router.project-osrm.org/route/v1/driving/{start_lon},{start_lat};{end_lon},{end_lat}?overview=full&geometries=geojson"
-    try:
-        response = requests.get(osrm_url).json()
-        if response.get('routes'):
-            route = response['routes'][0]
-            return route['geometry']['coordinates'], route['distance'] / 1000
-    except:
-        pass
-    return [[start_lon, start_lat], [end_lon, end_lat]], 0.0
+# --- 5. LAYOUT ---
+st.title("🚕 NYC Fare Predictor")
+st.caption("Enter a landmark (e.g., 'Grand Central' or 'MOMA') to find your ride.")
 
-# --- 3. LAYOUT ---
-st.title("🚕 HOW MUCH COSTS MY FUTURE RIDE?")
 left_col, right_col = st.columns([1, 1.5], gap="large")
 
 with left_col:
-    pickup = st.text_input("PICKUP LOCATION", placeholder="e.g. Empire State Building")
-    dropoff = st.text_input("DESTINATION", placeholder="e.g. Central Park")
-    passengers = st.pills("PASSENGERS", options=list(range(1, 9)), default=1)
+    with st.container():
+        st.subheader("📍 Trip Details")
+
+        # SEARCH LOGIC: Pickup
+        raw_pickup = st.text_input("PICKUP", placeholder="e.g. Empire State Building")
+        p_res = search_location(raw_pickup)
+        if p_res:
+            st.success(f"📍 Found: **{p_res['name']}**")
+            p_lon, p_lat = p_res['lon'], p_res['lat']
+
+        # SEARCH LOGIC: Destination
+        raw_dropoff = st.text_input("DESTINATION", placeholder="e.g. JFK Airport")
+        d_res = search_location(raw_dropoff)
+        if d_res:
+            st.info(f"🏁 Found: **{d_res['name']}**")
+            d_lon, d_lat = d_res['lon'], d_res['lat']
+
+        passengers = st.pills("PASSENGERS", options=[1, 2, 3, 4, 5, "6+"], default=1)
 
     st.write("---")
+
+    # Date/Time Logic
     now_dt = datetime.now()
     c1, c2 = st.columns([1, 2])
-
     with c1:
         st.markdown("<div style='height: 32px;'></div>", unsafe_allow_html=True)
-        # The "ORDER NOW" Button
-        if st.button("ORDER NOW 🚕", use_container_width=True):
+        if st.button("ORDER NOW 🚕", use_container_width=True, type="primary"):
             st.session_state.ordered = True
-            st.session_state.date = now_dt.date()
-            st.session_state.time = now_dt.time()
+            st.session_state.date, st.session_state.time = now_dt.date(), now_dt.time()
             st.rerun()
 
     with c2:
         scheduled_dt = st.datetime_input("SCHEDULE LATER", value=now_dt)
-        selected_date = scheduled_dt.date()
-        selected_time = scheduled_dt.time()
+        s_date, s_time = scheduled_dt.date(), scheduled_dt.time()
 
-    # Apply Session State overrides if "Order Now" was clicked
     if st.session_state.ordered:
-        selected_date = st.session_state.get('date', selected_date)
-        selected_time = st.session_state.get('time', selected_time)
+        s_date, s_time = st.session_state.get('date', s_date), st.session_state.get('time', s_time)
 
     st.write("##")
-    button_placeholder = st.empty()
-
-    # "EVALUATE" button logic
-    evaluate_clicked = False
+    btn_area = st.empty()
+    eval_click = False
     if not st.session_state.fare_calculated:
-        evaluate_clicked = button_placeholder.button("EVALUATE MY FARE", use_container_width=True, type="primary")
+        eval_click = btn_area.button("EVALUATE MY FARE", use_container_width=True)
 
-# --- 4. DATA PROCESSING & MAP (Right Column) ---
-p_lon, p_lat, d_lon, d_lat = None, None, None, None
+# --- 6. MAP & PREDICTION ---
+if raw_pickup and raw_dropoff and p_res and d_res:
+    # Get Route
+    osrm = f"http://router.project-osrm.org/route/v1/driving/{p_lon},{p_lat};{d_lon},{d_lat}?overview=full&geometries=geojson"
+    route_data = requests.get(osrm).json()
+    path = route_data['routes'][0]['geometry']['coordinates']
+    dist = route_data['routes'][0]['distance'] / 1000
 
-if pickup and dropoff:
-    with st.spinner("Locating addresses..."):
-        p_lon, p_lat = get_coords(pickup)
-        d_lon, d_lat = get_coords(dropoff)
+    with right_col:
+        st.metric("Estimated Distance", f"{dist:.2f} km")
+        st.pydeck_chart(pdk.Deck(
+            map_style="mapbox://styles/mapbox/navigation-day-v1",
+            initial_view_state=pdk.ViewState(latitude=(p_lat+d_lat)/2, longitude=(p_lon+d_lon)/2, zoom=12),
+            layers=[
+                pdk.Layer("PathLayer", [{"path": path}], get_path="path", get_color=[40, 167, 69], width_min_pixels=4),
+                pdk.Layer("ScatterplotLayer", [{"pos": [p_lon, p_lat]}, {"pos": [d_lon, d_lat]}],
+                          get_position="pos", get_color=[255, 75, 75], get_radius=150)
+            ]
+        ))
 
-    if p_lon and d_lon:
-        road_path, total_dist = get_route(p_lon, p_lat, d_lon, d_lat)
-
-        with right_col:
-            st.metric("Estimated Travel Distance", f"{total_dist:.2f} km")
-            st.pydeck_chart(pdk.Deck(
-                map_style="mapbox://styles/mapbox/light-v9",
-                initial_view_state=pdk.ViewState(
-                    latitude=(p_lat + d_lat) / 2,
-                    longitude=(p_lon + d_lon) / 2,
-                    zoom=12,
-                ),
-                layers=[
-                    pdk.Layer("PathLayer", [{"path": road_path}], get_path="path", get_color=[255, 75, 75], width_min_pixels=5),
-                    pdk.Layer("ScatterplotLayer", [
-                        {"pos": [p_lon, p_lat], "color": [255, 75, 75]},
-                        {"pos": [d_lon, d_lat], "color": [156, 204, 101]}
-                    ], get_position="pos", get_color="color", get_radius=150, radius_min_pixels=8)
-                ]
-            ))
-    else:
-        right_col.error("Could not find one of the addresses. Please be more specific (e.g., add 'NY').")
-else:
-    right_col.info("👋 Enter your pickup and destination on the left to start.")
-
-# --- 5. PREDICTION LOGIC ---
-if evaluate_clicked:
-    if not (p_lon and d_lon):
-        st.error("Please enter valid locations first!")
-    else:
-        pickup_datetime = f"{selected_date} {selected_time.strftime('%H:%M:%S')}"
+    # Prediction
+    if eval_click:
+        p_datetime = f"{s_date} {s_time.strftime('%H:%M:%S')}"
+        p_count = 6 if passengers == "6+" else passengers
         params = {
-            "pickup_datetime": pickup_datetime,
-            "pickup_longitude": p_lon, "pickup_latitude": p_lat,
-            "dropoff_longitude": d_lon, "dropoff_latitude": d_lat,
-            "passenger_count": passengers
+            "pickup_datetime": p_datetime, "pickup_longitude": p_lon, "pickup_latitude": p_lat,
+            "dropoff_longitude": d_lon, "dropoff_latitude": d_lat, "passenger_count": p_count
         }
+        try:
+            res = requests.get(url, params=params, timeout=10).json()
+            st.session_state.current_fare = res.get("fare", 0.0)
+            st.session_state.fare_calculated = True
+            st.rerun()
+        except: st.error("Prediction service unreachable.")
 
-        with st.spinner("Connecting to API..."):
-            try:
-                response = requests.get(url, params=params, timeout=10)
-                if response.status_code == 200:
-                    data = response.json()
-                    st.session_state.current_fare = data.get("fare", 0.0)
-                    st.session_state.fare_calculated = True
-                    st.rerun()
-                else:
-                    st.error(f"API Error: Status {response.status_code}")
-            except Exception as e:
-                st.error(f"Connection failed: {e}")
-
-# Display Result
 if st.session_state.fare_calculated:
-    button_placeholder.success(f"### 💰 Estimated Fare: ${st.session_state.current_fare:.2f}")
-    if st.button("Calculate New Trip"):
-        st.session_state.fare_calculated = False
-        st.session_state.ordered = False
-        st.rerun()
+    with left_col:
+        btn_area.success(f"### 💰 Est. Fare: ${st.session_state.current_fare:.2f}")
+        if st.button("Clear / New Trip"):
+            st.session_state.fare_calculated = False
+            st.session_state.ordered = False
+            st.rerun()
