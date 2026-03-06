@@ -28,6 +28,10 @@ st.markdown("""
     """, unsafe_allow_html=True)
 
 # 3. INITIALIZATION & UTILITIES
+if 'ordered_now' not in st.session_state:
+    st.session_state.ordered_now = False
+if 'scheduled' not in st.session_state:
+    st.session_state.scheduled = False
 if 'fare_calculated' not in st.session_state:
     st.session_state.fare_calculated = False
 
@@ -58,8 +62,8 @@ left_col, right_col = st.columns([1, 1.5], gap="large")
 
 with left_col:
     # 1. Location Inputs First
-    pickup = st.text_input("PICKUP LOCATION", placeholder="e.g. 75 rue de Rome Paris")
-    dropoff = st.text_input("DESTINATION", placeholder="e.g. 73 rue Nollet Paris")
+    pickup = st.text_input("PICKUP LOCATION", placeholder="⚠️Only works for NYC")
+    dropoff = st.text_input("DESTINATION", placeholder="⚠️Only works for NYC")
     passengers = st.pills("PASSENGERS", options=list(range(1, 9)), default=1)
 
     # 2. Date/Time Setup (Now below Passengers)
@@ -69,15 +73,38 @@ with left_col:
 
     with c1:
         st.markdown("<div style='height: 32px;'></div>", unsafe_allow_html=True)
-        if st.button("ORDER NOW 🚕", type="primary", use_container_width=True):
-            st.session_state.date = now_dt.date()
-            st.session_state.time = now_dt.time()
-            st.session_state.fare_calculated = False # Reset on new order
+
+        # If already ordered, show a green "Confirmed" message instead of a button
+        if st.session_state.ordered_now:
+            st.success("✅ ORDERED NOW")
+            if st.button("Cancel", key="cancel_now"):
+                st.session_state.ordered_now = False
+                st.rerun()
+        else:
+            if st.button("ORDER NOW 🚕", type="primary", use_container_width=True):
+                st.session_state.date = now_dt.date()
+                st.session_state.time = now_dt.time()
+                st.session_state.ordered_now = True
+                st.session_state.scheduled = False # Reset the other one
+                st.rerun()
 
     with c2:
-        scheduled_dt = st.datetime_input("SCHEDULE LATER", value=now_dt, format="DD/MM/YYYY")
-        selected_date = scheduled_dt.date()
-        selected_time = scheduled_dt.time()
+        if st.session_state.scheduled:
+            # Show the green confirmation with the saved date/time
+            formatted_dt = st.session_state.scheduled_dt.strftime("%d/%m %H:%M")
+            st.success(f"✅ ORDERED FOR {formatted_dt}")
+            if st.button("Change Schedule", key="change_sched"):
+                st.session_state.scheduled = False
+                st.rerun()
+        else:
+            scheduled_dt = st.datetime_input("SCHEDULE LATER", value=now_dt, format="DD/MM/YYYY")
+            if st.button("CONFIRM SCHEDULE", use_container_width=True):
+                st.session_state.date = scheduled_dt.date()
+                st.session_state.time = scheduled_dt.time()
+                st.session_state.scheduled_dt = scheduled_dt # Save for the label
+                st.session_state.scheduled = True
+                st.session_state.ordered_now = False # Reset the other one
+                st.rerun()
 
     # Apply Session State overrides
     if 'date' in st.session_state:
