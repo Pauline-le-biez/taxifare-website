@@ -73,38 +73,15 @@ with left_col:
 
     with c1:
         st.markdown("<div style='height: 32px;'></div>", unsafe_allow_html=True)
-
-        # If already ordered, show a green "Confirmed" message instead of a button
-        if st.session_state.ordered_now:
-            st.success("✅ ORDERED NOW")
-            if st.button("Cancel", key="cancel_now"):
-                st.session_state.ordered_now = False
-                st.rerun()
-        else:
-            if st.button("ORDER NOW 🚕", type="primary", use_container_width=True):
-                st.session_state.date = now_dt.date()
-                st.session_state.time = now_dt.time()
-                st.session_state.ordered_now = True
-                st.session_state.scheduled = False # Reset the other one
-                st.rerun()
+        if st.button("ORDER NOW 🚕", type="primary", use_container_width=True):
+            st.session_state.date = now_dt.date()
+            st.session_state.time = now_dt.time()
+            st.session_state.fare_calculated = False # Reset on new order
 
     with c2:
-        if st.session_state.scheduled:
-            # Show the green confirmation with the saved date/time
-            formatted_dt = st.session_state.scheduled_dt.strftime("%d/%m %H:%M")
-            st.success(f"✅ ORDERED FOR {formatted_dt}")
-            if st.button("Change Schedule", key="change_sched"):
-                st.session_state.scheduled = False
-                st.rerun()
-        else:
-            scheduled_dt = st.datetime_input("SCHEDULE LATER", value=now_dt, format="DD/MM/YYYY")
-            if st.button("CONFIRM SCHEDULE", use_container_width=True):
-                st.session_state.date = scheduled_dt.date()
-                st.session_state.time = scheduled_dt.time()
-                st.session_state.scheduled_dt = scheduled_dt # Save for the label
-                st.session_state.scheduled = True
-                st.session_state.ordered_now = False # Reset the other one
-                st.rerun()
+        scheduled_dt = st.datetime_input("SCHEDULE LATER", value=now_dt, format="DD/MM/YYYY")
+        selected_date = scheduled_dt.date()
+        selected_time = scheduled_dt.time()
 
     # Apply Session State overrides
     if 'date' in st.session_state:
