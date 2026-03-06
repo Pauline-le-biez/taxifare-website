@@ -90,29 +90,43 @@ with right_col:
         route_path = [[p_coords['lon'], p_coords['lat']], [d_coords['lon'], d_coords['lat']]]
         total_dist_km = 0.0
 
-    # Affichage des KM réalisés
     st.metric("Distance du trajet", f"{total_dist_km:.2f} KM")
 
+    # Utilisation d'un style de carte gratuit (CartoDB) pour éviter les erreurs d'affichage
     st.pydeck_chart(pdk.Deck(
-        map_style="mapbox://styles/mapbox/light-v9",
+        map_style="https://basemaps.cartocdn.com/gl/positron-gl-style/style.json",
         initial_view_state=pdk.ViewState(
             latitude=(p_coords['lat']+d_coords['lat'])/2,
             longitude=(p_coords['lon']+d_coords['lon'])/2,
-            zoom=12
+            zoom=10
         ),
         layers=[
-            pdk.Layer("PathLayer", [{"path": route_path}], get_path="path", get_color=[255, 75, 75], width_min_pixels=5),
-            pdk.Layer("ScatterplotLayer", [
-                {"pos": [p_coords['lon'], p_coords['lat']], "name": "Pickup"},
-                {"pos": [d_coords['lon'], d_coords['lat']], "name": "Dropoff"}
-            ], get_position="pos", get_color=[255, 75, 75], get_radius=200)
+            pdk.Layer(
+                "PathLayer",
+                [{"path": route_path}],
+                get_path="path",
+                get_color=[255, 75, 75],
+                width_min_pixels=5
+            ),
+            pdk.Layer(
+                "ScatterplotLayer",
+                [
+                    {"pos": [p_coords['lon'], p_coords['lat']], "color": [255, 75, 75]},
+                    {"pos": [d_coords['lon'], d_coords['lat']], "color": [40, 167, 69]}
+                ],
+                get_position="pos",
+                get_color="color",
+                get_radius=300
+            )
         ]
     ))
 
 # --- 6. PRÉDICTION VIA API ---
 if eval_click:
-    api_url = f"{st.secrets['url_base'].rstrip('/')}/predict"
-    # Formatage strict pour ton modèle : %Y-%m-%d %H:%M:%S
+    # On s'assure que l'URL finit par /predict
+    base_url = st.secrets['url_base'].strip().rstrip('/')
+    api_url = f"{base_url}/predict"
+
     pickup_dt_str = f"{sel_date} {sel_time.strftime('%H:%M:%S')}"
 
     params = {
@@ -124,23 +138,17 @@ if eval_click:
         "passenger_count": int(passengers)
     }
 
-    with st.spinner("Appel à l'API de prédiction..."):
+    with st.spinner("L'API se réveille... calcul en cours (cela peut prendre 20s)"):
         try:
-            r = requests.get(api_url, params=params, timeout=10)
+            # On augmente le timeout à 30 secondes pour laisser le temps au Cloud Run de démarrer
+            r = requests.get(api_url, params=params, timeout=30)
             if r.status_code == 200:
                 st.session_state.current_fare = r.json().get("fare", 0.0)
                 st.session_state.fare_calculated = True
                 st.rerun()
             else:
-                st.error(f"Erreur API ({r.status_code}) : {r.text}")
+                st.error(f"Erreur API ({r.status_code}) : Vérifie tes paramètres.")
+        except requests.exceptions.Timeout:
+            st.error("Délai dépassé : Ton API met trop de temps à répondre. Réessaie dans quelques secondes.")
         except Exception as e:
             st.error(f"Erreur de connexion : {e}")
-
-# Affichage du résultat final
-if st.session_state.fare_calculated:
-    with left_col:
-        btn_area.success(f"### 💰 Tarif Estimé : ${st.session_state.current_fare:.2f}")
-        if st.button("Recommencer"):
-            st.session_state.fare_calculated = False
-            st.session_state.ordered = False
-            st.rerun()
