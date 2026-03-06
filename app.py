@@ -31,7 +31,7 @@ st.markdown("""
 if 'fare_calculated' not in st.session_state:
     st.session_state.fare_calculated = False
 
-url_base = 'https://taxifare-218758107780.europe-west9.run.app/predict'
+url = st.secrets["url_base"]
 geolocator = Nominatim(user_agent="taxifare_app_final")
 
 def get_coords(address):
@@ -132,7 +132,7 @@ with right_col:
 
                 with st.spinner("Calculating fare..."):
                     try:
-                        response = requests.get(url_base, params=params)
+                        response = requests.get(url, params=params)
                         data = response.json()
                         st.session_state.current_fare = data.get("fare", 0.0)
                         st.session_state.fare_calculated = True
