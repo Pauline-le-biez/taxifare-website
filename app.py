@@ -120,15 +120,14 @@ with right_col:
             )
         ]
     ))
-
 # --- 6. PRÉDICTION VIA API ---
 if eval_click:
-    # 1. On nettoie l'URL de base pour éviter les doubles slashes ou les espaces
-    # Si ton secret est "https://nom-api.run.app", cela devient "https://nom-api.run.app/predict"
+    # On nettoie l'URL pour être certain qu'elle est correcte
+    # Ta base URL doit être : https://taxifare-218758107780.europe-west9.run.app
     base_url = st.secrets['url_base'].strip().rstrip('/')
     api_url = f"{base_url}/predict"
 
-    # 2. Formatage de la date exactement comme ton décorateur @app.get("/predict") l'attend
+    # Formatage de la date pour ton modèle FastAPI (%Y-%m-%d %H:%M:%S)
     pickup_dt_str = f"{sel_date} {sel_time.strftime('%H:%M:%S')}"
 
     params = {
@@ -140,22 +139,36 @@ if eval_click:
         "passenger_count": int(passengers)
     }
 
-    with st.spinner("Appel de l'API en cours..."):
+    with st.spinner("L'API calcule votre tarif..."):
         try:
-            # On affiche l'URL de test une seule fois pour vérifier en cas d'échec
-            # st.write(f"DEBUG: Envoi vers {api_url}")
-
+            # On envoie la requête
             response = requests.get(api_url, params=params, timeout=30)
 
             if response.status_code == 200:
-                # Ton API retourne {'fare': float(prediction)}
-                st.session_state.current_fare = response.json().get("fare", 0.0)
-                st.session_state.fare_calculated = True
-                st.rerun()
+                # On récupère la valeur 'fare' du JSON retourné par ton API
+                prediction = response.json().get("fare")
+
+                if prediction is not None:
+                    st.session_state.current_fare = float(prediction)
+                    st.session_state.fare_calculated = True
+                    st.rerun() # On relance pour afficher le succès en haut à gauche
+                else:
+                    st.error("L'API a répondu mais n'a pas renvoyé de champ 'fare'.")
+
             elif response.status_code == 404:
-                st.error(f"Erreur 404 : L'URL '{api_url}' est introuvable. Vérifie que ton API FastAPI contient bien @app.get('/predict').")
+                st.error(f"Erreur 404 : L'endpoint /predict est introuvable sur {base_url}")
             else:
                 st.error(f"Erreur API ({response.status_code}) : {response.text}")
 
         except Exception as e:
             st.error(f"Erreur de connexion : {e}")
+
+# --- 7. AFFICHAGE DU RÉSULTAT (Dans la colonne de gauche) ---
+if st.session_state.fare_calculated:
+    with left_col:
+        # On utilise le placeholder pour remplacer le bouton par le prix
+        btn_area.success(f"### 💰 Estimated Fare: ${st.session_state.current_fare:.2f}")
+        if st.button("Calculate New Trip", use_container_width=True):
+            st.session_state.fare_calculated = False
+            st.session_state.ordered = False
+            st.rerun()
