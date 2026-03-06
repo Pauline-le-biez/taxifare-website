@@ -3,21 +3,32 @@ import requests
 import pandas as pd
 import pydeck as pdk
 from datetime import datetime
-from geopy.geocoders import Nominatim
 
-# 1. PAGE CONFIGURATION
+# 1. CONFIGURATION & STATE
 st.set_page_config(layout="wide", page_title="Taxi Fare Predictor")
 
-# 2. INITIALIZATION & STATE
 if 'fare_calculated' not in st.session_state: st.session_state.fare_calculated = False
 if 'ordered' not in st.session_state: st.session_state.ordered = False
+if 'current_fare' not in st.session_state: st.session_state.current_fare = 0.0
 
-# CSS for the Red/Green Button and UI
+# 2. BASE DE DONNÉES DES MONUMENTS (Évite le géocodage lent)
+NYC_LANDMARKS = {
+    "Empire State Building": {"lat": 40.7484, "lon": -73.9857},
+    "Central Park (Strawberry Fields)": {"lat": 40.7750, "lon": -73.9750},
+    "JFK Airport": {"lat": 40.6413, "lon": -73.7781},
+    "Grand Central Terminal": {"lat": 40.7527, "lon": -73.9772},
+    "Times Square": {"lat": 40.7580, "lon": -73.9855},
+    "Statue of Liberty (Battery Park)": {"lat": 40.7033, "lon": -74.0170},
+    "Brooklyn Bridge": {"lat": 40.7061, "lon": -73.9969},
+    "MOMA": {"lat": 40.7614, "lon": -73.9776},
+    "Wall Street": {"lat": 40.7060, "lon": -74.0088}
+}
+
+# 3. STYLE DYNAMIQUE (Bouton Rouge -> Vert)
 button_color = "#28a745" if st.session_state.ordered else "#FF4B4B"
 st.markdown(f"""
     <style>
     html, body, [class*="View"] {{ font-size: 18px !important; }}
-    /* Targets the 'Order Now' button specifically */
     div.stButton > button[kind="primary"]:first-child {{
         background-color: {button_color} !important;
         color: white !important;
@@ -26,35 +37,19 @@ st.markdown(f"""
     </style>
     """, unsafe_allow_html=True)
 
-# 3. FAST UTILITIES
-# Cache coordinates so the app doesn't freeze on every click
-@st.cache_data(show_spinner=False)
-def get_coords(address):
-    if not address or len(address) < 3: return None, None
-    try:
-        # We add 'New York City' to force the geocoder to stay in the right area
-        geolocator = Nominatim(user_agent="taxi_fare_predictor_final")
-        location = geolocator.geocode(f"{address}, New York City", timeout=5)
-        return (location.longitude, location.latitude) if location else (None, None)
-    except: return None, None
-
-def get_route(p_lon, p_lat, d_lon, d_lat):
-    url = f"http://router.project-osrm.org/route/v1/driving/{p_lon},{p_lat};{d_lon},{d_lat}?overview=full&geometries=geojson"
-    try:
-        r = requests.get(url, timeout=3).json()
-        if r.get('routes'):
-            return r['routes'][0]['geometry']['coordinates'], r['routes'][0]['distance'] / 1000
-    except: pass
-    return [[p_lon, p_lat], [d_lon, d_lat]], 0.0
-
 # --- 4. LAYOUT ---
 st.title("🚕 HOW MUCH COSTS MY FUTURE RIDE?")
-
 left_col, right_col = st.columns([1, 1.5], gap="large")
 
 with left_col:
-    pickup = st.text_input("PICKUP LOCATION", placeholder="e.g. Empire State Building", value="Grand Central, NY")
-    dropoff = st.text_input("DESTINATION", placeholder="e.g. MOMA", value="MOMA, NY")
+    # Menu déroulant pour une sélection sans erreur
+    pickup_name = st.selectbox("PICKUP LOCATION", options=list(NYC_LANDMARKS.keys()))
+    dropoff_name = st.selectbox("DESTINATION", options=list(NYC_LANDMARKS.keys()), index=1)
+
+    # Extraction immédiate des coordonnées
+    p_coords = NYC_LANDMARKS[pickup_name]
+    d_coords = NYC_LANDMARKS[dropoff_name]
+
     passengers = st.pills("PASSENGERS", options=list(range(1, 9)), default=1)
 
     st.write("---")
@@ -72,69 +67,80 @@ with left_col:
         scheduled_dt = st.datetime_input("SCHEDULE LATER", value=now_dt)
         sel_date, sel_time = scheduled_dt.date(), scheduled_dt.time()
 
-    # Use "Order Now" time if clicked
+    # Application du temps "Order Now" si activé
     if st.session_state.ordered:
         sel_date = st.session_state.get('date', sel_date)
         sel_time = st.session_state.get('time', sel_time)
 
     st.write("##")
     btn_area = st.empty()
-    eval_clicked = False
+    eval_click = False
     if not st.session_state.fare_calculated:
-        eval_clicked = btn_area.button("EVALUATE MY FARE", use_container_width=True)
+        eval_click = btn_area.button("EVALUATE MY FARE", use_container_width=True)
 
-# --- 5. THE LOGIC ENGINE ---
-p_lon, p_lat = get_coords(pickup)
-d_lon, d_lat = get_coords(dropoff)
+# --- 5. CARTE & CALCUL DE DISTANCE ---
+with right_col:
+    # Calcul d'itinéraire réel via OSRM
+    osrm_url = f"http://router.project-osrm.org/route/v1/driving/{p_coords['lon']},{p_coords['lat']};{d_coords['lon']},{d_coords['lat']}?overview=full&geometries=geojson"
+    try:
+        response = requests.get(osrm_url, timeout=5).json()
+        route_path = response['routes'][0]['geometry']['coordinates']
+        total_dist_km = response['routes'][0]['distance'] / 1000
+    except:
+        route_path = [[p_coords['lon'], p_coords['lat']], [d_coords['lon'], d_coords['lat']]]
+        total_dist_km = 0.0
 
-if p_lon and d_lon:
-    road_path, total_dist = get_route(p_lon, p_lat, d_lon, d_lat)
+    # Affichage des KM réalisés
+    st.metric("Distance du trajet", f"{total_dist_km:.2f} KM")
 
-    with right_col:
-        st.metric("Estimated Travel Distance", f"{total_dist:.2f} km")
-        st.pydeck_chart(pdk.Deck(
-            map_style="mapbox://styles/mapbox/light-v9",
-            initial_view_state=pdk.ViewState(latitude=(p_lat+d_lat)/2, longitude=(p_lon+d_lon)/2, zoom=13),
-            layers=[
-                pdk.Layer("PathLayer", [{"path": road_path}], get_path="path", get_color=[255, 75, 75], width_min_pixels=5),
-                pdk.Layer("ScatterplotLayer", [{"pos":[p_lon, p_lat]}, {"pos":[d_lon, d_lat]}], get_position="pos", get_color=[255, 75, 75], get_radius=150)
-            ]
-        ))
+    st.pydeck_chart(pdk.Deck(
+        map_style="mapbox://styles/mapbox/light-v9",
+        initial_view_state=pdk.ViewState(
+            latitude=(p_coords['lat']+d_coords['lat'])/2,
+            longitude=(p_coords['lon']+d_coords['lon'])/2,
+            zoom=12
+        ),
+        layers=[
+            pdk.Layer("PathLayer", [{"path": route_path}], get_path="path", get_color=[255, 75, 75], width_min_pixels=5),
+            pdk.Layer("ScatterplotLayer", [
+                {"pos": [p_coords['lon'], p_coords['lat']], "name": "Pickup"},
+                {"pos": [d_coords['lon'], d_coords['lat']], "name": "Dropoff"}
+            ], get_position="pos", get_color=[255, 75, 75], get_radius=200)
+        ]
+    ))
 
-    if eval_clicked:
-        # PREDICTION API CALL
-        api_url = f"{st.secrets['url_base'].rstrip('/')}/predict"
-        # Format date exactly as your FastAPI expects: %Y-%m-%d %H:%M:%S
-        pickup_dt_str = f"{sel_date} {sel_time.strftime('%H:%M:%S')}"
+# --- 6. PRÉDICTION VIA API ---
+if eval_click:
+    api_url = f"{st.secrets['url_base'].rstrip('/')}/predict"
+    # Formatage strict pour ton modèle : %Y-%m-%d %H:%M:%S
+    pickup_dt_str = f"{sel_date} {sel_time.strftime('%H:%M:%S')}"
 
-        params = {
-            "pickup_datetime": pickup_dt_str,
-            "pickup_longitude": float(p_lon),
-            "pickup_latitude": float(p_lat),
-            "dropoff_longitude": float(d_lon),
-            "dropoff_latitude": float(d_lat),
-            "passenger_count": int(passengers)
-        }
+    params = {
+        "pickup_datetime": pickup_dt_str,
+        "pickup_longitude": float(p_coords['lon']),
+        "pickup_latitude": float(p_coords['lat']),
+        "dropoff_longitude": float(d_coords['lon']),
+        "dropoff_latitude": float(d_coords['lat']),
+        "passenger_count": int(passengers)
+    }
 
-        with st.spinner("Calculating fare..."):
-            try:
-                response = requests.get(api_url, params=params, timeout=15)
-                if response.status_code == 200:
-                    st.session_state.current_fare = response.json().get("fare", 0.0)
-                    st.session_state.fare_calculated = True
-                    st.rerun()
-                else:
-                    st.error(f"API Error {response.status_code}: {response.text}")
-            except Exception as e:
-                st.error(f"Could not connect to API: {e}")
-else:
-    with right_col:
-        st.warning("⚠️ Enter valid NYC locations to see the map and prediction.")
+    with st.spinner("Appel à l'API de prédiction..."):
+        try:
+            r = requests.get(api_url, params=params, timeout=10)
+            if r.status_code == 200:
+                st.session_state.current_fare = r.json().get("fare", 0.0)
+                st.session_state.fare_calculated = True
+                st.rerun()
+            else:
+                st.error(f"Erreur API ({r.status_code}) : {r.text}")
+        except Exception as e:
+            st.error(f"Erreur de connexion : {e}")
 
-# Result Banner
+# Affichage du résultat final
 if st.session_state.fare_calculated:
-    btn_area.success(f"### 💰 Estimated Fare: ${st.session_state.current_fare:.2f}")
-    if st.button("Calculate New Trip"):
-        st.session_state.fare_calculated = False
-        st.session_state.ordered = False
-        st.rerun()
+    with left_col:
+        btn_area.success(f"### 💰 Tarif Estimé : ${st.session_state.current_fare:.2f}")
+        if st.button("Recommencer"):
+            st.session_state.fare_calculated = False
+            st.session_state.ordered = False
+            st.rerun()
